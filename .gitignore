@@ -15,3 +15,10 @@ tracer/pin/obj-intel64/
 
 vcpkg_installed/
 
+traces/**
+
+output/**
+ 
+champsim_configs/**
+
+champsim_configs.db

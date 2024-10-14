@@ -1,299 +1,243 @@
-import numpy as np
 import random
 import json
 import subprocess
 import sys
-import pickle
 from datetime import datetime
-
-# from json_reader import parse_output
-import os
-from google.cloud import firestore, storage
 import time
+import os
+import sqlite3
 
-frequency_mapper = {
-    0: 1000,
-    1: 1250,
-    2: 1500,
-    3: 1750,
-    4: 2000,
-    5: 2250,
-    6: 2500,
-    7: 2750,
-    8: 3000,
-    9: 3250,
-    10: 3500,
-    11: 3750,
-    12: 4000,
-    13: 4250,
-    14: 4500,
-}
-ifetch_buffer_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-decode_buffer_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-dispatch_buffer_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-rob_size_mapper = {
-    0: 16,
-    1: 32,
-    2: 48,
-    3: 64,
-    4: 80,
-    5: 96,
-    6: 112,
-    7: 128,
-    8: 144,
-    9: 160,
-    10: 176,
-    11: 192,
-    12: 208,
-    13: 224,
-    14: 240,
-    15: 256,
-    16: 320,
-    17: 384,
-    18: 448,
-    19: 512,
-    20: 576,
-}
-lq_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-sq_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-fetch_width_mapper = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6, 5: 7, 6: 8}
-decode_width_mapper = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6, 5: 7, 6: 8}
-dispatch_width_mapper = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6, 5: 7, 6: 8}
-execute_width_mapper = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6, 5: 7, 6: 8}
-lq_width_mapper = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6, 5: 7, 6: 8}
-sq_width_mapper = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6, 5: 7, 6: 8}
-retire_width_mapper = {0: 2, 1: 3, 2: 4, 3: 5, 4: 6, 5: 7, 6: 8}
-scheduler_size_mapper = {
-    0: 2,
-    1: 4,
-    2: 8,
-    3: 16,
-    4: 32,
-    5: 64,
-    6: 128,
-    7: 144,
-    8: 160,
-    9: 176,
-    10: 192,
-    11: 208,
-    12: 256,
-}
-branch_predictor_mapper = {
-    0: "bimodal",
-    1: "gshare",
-    2: "hashed_perceptron",
-    3: "perceptron",
-}
-btb_mapper = {0: "basic_btb", 1: "basic_btb_1"}
+SIM_INSTRUCTIONS = 1000000
+DB_FILE = "ChampSim/champsim_configs.db"
+TRACE_DIR = "traces"
 
-# DIB
-window_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64}
-dib_sets_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64}
-dib_ways_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64}
+# Initialize the database which stores already run configurations
+def initialize_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
 
-# L1I
-l1i_sets_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64}
-l1i_ways_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64}
-l1i_rq_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-l1i_wq_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-l1i_pq_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-l1i_mshr_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-l1i_prefetcher_mapper = {0: "no_instr", 1: "next_line_instr"}
+    cursor.execute('''CREATE TABLE IF NOT EXISTS configs (
+                        trace TEXT NOT NULL,
+                        frequency INTEGER,
+                        ifetch_buffer_size INTEGER,
+                        decode_buffer_size INTEGER,
+                        dispatch_buffer_size INTEGER,
+                        rob_size INTEGER,
+                        lq_size INTEGER,
+                        sq_size INTEGER,
+                        fetch_width INTEGER,
+                        decode_width INTEGER,
+                        dispatch_width INTEGER,
+                        execute_width INTEGER,
+                        lq_width INTEGER,
+                        sq_width INTEGER,
+                        retire_width INTEGER,
+                        scheduler_size INTEGER,
+                        branch_predictor TEXT,
+                        btb TEXT,
+                        dib_window_size INTEGER,
+                        dib_sets INTEGER,
+                        dib_ways INTEGER,
+                        l1i_sets INTEGER,
+                        l1i_ways INTEGER,
+                        l1i_rq_size INTEGER,
+                        l1i_wq_size INTEGER,
+                        l1i_pq_size INTEGER,
+                        l1i_mshr_size INTEGER,
+                        l1i_prefetcher TEXT,
+                        l1d_sets INTEGER,
+                        l1d_ways INTEGER,
+                        l1d_rq_size INTEGER,
+                        l1d_wq_size INTEGER,
+                        l1d_pq_size INTEGER,
+                        l1d_mshr_size INTEGER,
+                        l1d_prefetcher TEXT,
+                        timestamp TEXT,
+                        status TEXT,
+                        result TEXT,
+                        pid INTEGER,
+                        duration REAL,
+                        additional_info TEXT,
+                        PRIMARY KEY (trace, frequency, ifetch_buffer_size, decode_buffer_size, dispatch_buffer_size)
+                    )''')
+    conn.commit()
+    conn.close()
 
-# L1D
-l1d_sets_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64}
-l1d_ways_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64}
-l1d_rq_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-l1d_wq_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-l1d_pq_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-l1d_mshr_size_mapper = {0: 2, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64, 6: 128}
-l1d_prefetcher_mapper = {
-    0: "ip_stride",
-    1: "next_line",
-    2: "no",
-    3: "spp_dev",
-    4: "va_ampm_lite",
-}
-
-
-def decode(act_encoded):
+# Decode the encoded configuration to human-readable format
+def decode(act_encoded, mappers):
     act_decoded = {}
     if isinstance(act_encoded, dict):
-        act_decoded["Frequency"] = frequency_mapper[act_encoded["Frequency"]]
-        act_decoded["iFetchBufferSize"] = ifetch_buffer_size_mapper[
-            act_encoded["iFetchBufferSize"]
+        act_decoded["Frequency"] = mappers["frequency_mapper"][str(act_encoded["Frequency"])]
+        act_decoded["iFetchBufferSize"] = mappers["ifetch_buffer_size_mapper"][
+            str(act_encoded["iFetchBufferSize"])
         ]
-        act_decoded["DecodeBufferSize"] = decode_buffer_size_mapper[
-            act_encoded["DecodeBufferSize"]
+        act_decoded["DecodeBufferSize"] = mappers["decode_buffer_size_mapper"][
+            str(act_encoded["DecodeBufferSize"])
         ]
-        act_decoded["DispatchBufferSize"] = dispatch_buffer_size_mapper[
-            act_encoded["DispatchBufferSize"]
+        act_decoded["DispatchBufferSize"] = mappers["dispatch_buffer_size_mapper"][
+            str(act_encoded["DispatchBufferSize"])
         ]
-        act_decoded["ROBSize"] = rob_size_mapper[act_encoded["ROBSize"]]
-        act_decoded["LQSize"] = lq_size_mapper[act_encoded["LQSize"]]
-        act_decoded["SQSize"] = sq_size_mapper[act_encoded["SQSize"]]
-        act_decoded["FetchWidth"] = fetch_width_mapper[act_encoded["FetchWidth"]]
-        act_decoded["DecodeWidth"] = decode_width_mapper[act_encoded["DecodeWidth"]]
-        act_decoded["DispatchWidth"] = dispatch_width_mapper[
-            act_encoded["DispatchWidth"]
+        act_decoded["ROBSize"] = mappers["rob_size_mapper"][str(act_encoded["ROBSize"])]
+        act_decoded["LQSize"] = mappers["lq_size_mapper"][str(act_encoded["LQSize"])]
+        act_decoded["SQSize"] = mappers["sq_size_mapper"][str(act_encoded["SQSize"])]
+        act_decoded["FetchWidth"] = mappers["fetch_width_mapper"][str(act_encoded["FetchWidth"])]
+        act_decoded["DecodeWidth"] = mappers["decode_width_mapper"][str(act_encoded["DecodeWidth"])]
+        act_decoded["DispatchWidth"] = mappers["dispatch_width_mapper"][
+            str(act_encoded["DispatchWidth"])
         ]
-        act_decoded["ExecuteWidth"] = execute_width_mapper[act_encoded["ExecuteWidth"]]
-        act_decoded["LQWidth"] = lq_width_mapper[act_encoded["LQWidth"]]
-        act_decoded["SQWidth"] = sq_width_mapper[act_encoded["SQWidth"]]
-        act_decoded["RetireWidth"] = retire_width_mapper[act_encoded["RetireWidth"]]
-        act_decoded["SchedulerSize"] = scheduler_size_mapper[
-            act_encoded["SchedulerSize"]
+        act_decoded["ExecuteWidth"] = mappers["execute_width_mapper"][str(act_encoded["ExecuteWidth"])]
+        act_decoded["LQWidth"] = mappers["lq_width_mapper"][str(act_encoded["LQWidth"])]
+        act_decoded["SQWidth"] = mappers["sq_width_mapper"][str(act_encoded["SQWidth"])]
+        act_decoded["RetireWidth"] = mappers["retire_width_mapper"][str(act_encoded["RetireWidth"])]
+        act_decoded["SchedulerSize"] = mappers["scheduler_size_mapper"][
+            str(act_encoded["SchedulerSize"])
         ]
-        act_decoded["BranchPredictor"] = branch_predictor_mapper[
-            act_encoded["BranchPredictor"]
+        act_decoded["BranchPredictor"] = mappers["branch_predictor_mapper"][
+            str(act_encoded["BranchPredictor"])
         ]
-        act_decoded["BTB"] = btb_mapper[act_encoded["BTB"]]
+        act_decoded["BTB"] = mappers["btb_mapper"][str(act_encoded["BTB"])]
 
-        act_decoded["DIBWindowSize"] = window_size_mapper[act_encoded["DIBWindowSize"]]
-        act_decoded["DIBSets"] = dib_sets_mapper[act_encoded["DIBSets"]]
-        act_decoded["DIBWays"] = dib_ways_mapper[act_encoded["DIBWays"]]
+        act_decoded["DIBWindowSize"] = mappers["window_size_mapper"][str(act_encoded["DIBWindowSize"])]
+        act_decoded["DIBSets"] = mappers["dib_sets_mapper"][str(act_encoded["DIBSets"])]
+        act_decoded["DIBWays"] = mappers["dib_ways_mapper"][str(act_encoded["DIBWays"])]
 
-        act_decoded["L1ISets"] = l1i_sets_mapper[act_encoded["L1ISets"]]
-        act_decoded["L1IWays"] = l1i_ways_mapper[act_encoded["L1IWays"]]
-        act_decoded["L1IRQSize"] = l1i_rq_size_mapper[act_encoded["L1IRQSize"]]
-        act_decoded["L1IWQSize"] = l1i_wq_size_mapper[act_encoded["L1IWQSize"]]
-        act_decoded["L1IPQSize"] = l1i_pq_size_mapper[act_encoded["L1IPQSize"]]
-        act_decoded["L1IMSHRSize"] = l1i_mshr_size_mapper[act_encoded["L1IMSHRSize"]]
-        act_decoded["L1IPrefetcher"] = l1i_prefetcher_mapper[
-            act_encoded["L1IPrefetcher"]
+        act_decoded["L1ISets"] = mappers["l1i_sets_mapper"][str(act_encoded["L1ISets"])]
+        act_decoded["L1IWays"] = mappers["l1i_ways_mapper"][str(act_encoded["L1IWays"])]
+        act_decoded["L1IRQSize"] = mappers["l1i_rq_size_mapper"][str(act_encoded["L1IRQSize"])]
+        act_decoded["L1IWQSize"] = mappers["l1i_wq_size_mapper"][str(act_encoded["L1IWQSize"])]
+        act_decoded["L1IPQSize"] = mappers["l1i_pq_size_mapper"][str(act_encoded["L1IPQSize"])]
+        act_decoded["L1IMSHRSize"] = mappers["l1i_mshr_size_mapper"][str(act_encoded["L1IMSHRSize"])]
+        act_decoded["L1IPrefetcher"] = mappers["l1i_prefetcher_mapper"][
+            str(act_encoded["L1IPrefetcher"])
         ]
 
-        act_decoded["L1DSets"] = l1i_sets_mapper[act_encoded["L1DSets"]]
-        act_decoded["L1DWays"] = l1i_ways_mapper[act_encoded["L1DWays"]]
-        act_decoded["L1DRQSize"] = l1i_rq_size_mapper[act_encoded["L1DRQSize"]]
-        act_decoded["L1DWQSize"] = l1i_wq_size_mapper[act_encoded["L1DWQSize"]]
-        act_decoded["L1DPQSize"] = l1i_pq_size_mapper[act_encoded["L1DPQSize"]]
-        act_decoded["L1DMSHRSize"] = l1i_mshr_size_mapper[act_encoded["L1DMSHRSize"]]
-        act_decoded["L1DPrefetcher"] = l1d_prefetcher_mapper[
-            act_encoded["L1DPrefetcher"]
+        act_decoded["L1DSets"] = mappers["l1d_sets_mapper"][str(act_encoded["L1DSets"])]
+        act_decoded["L1DWays"] = mappers["l1d_ways_mapper"][str(act_encoded["L1DWays"])]
+        act_decoded["L1DRQSize"] = mappers["l1d_rq_size_mapper"][str(act_encoded["L1DRQSize"])]
+        act_decoded["L1DWQSize"] = mappers["l1d_wq_size_mapper"][str(act_encoded["L1DWQSize"])]
+        act_decoded["L1DPQSize"] = mappers["l1d_pq_size_mapper"][str(act_encoded["L1DPQSize"])]
+        act_decoded["L1DMSHRSize"] = mappers["l1d_mshr_size_mapper"][str(act_encoded["L1DMSHRSize"])]
+        act_decoded["L1DPrefetcher"] = mappers["l1d_prefetcher_mapper"][
+            str(act_encoded["L1DPrefetcher"])
         ]
+
     return act_decoded
 
+# Save the configuration to the database
+def save_config_to_db(trace, config, additional_info=None):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
 
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    status = "pending"  # Start with "pending" status
+
+    cursor.execute('''SELECT COUNT(*) FROM configs WHERE trace = ? AND 
+                      frequency = ? AND ifetch_buffer_size = ? AND decode_buffer_size = ? AND 
+                      dispatch_buffer_size = ? AND rob_size = ?''', 
+                   (trace, config["Frequency"], config["iFetchBufferSize"], config["DecodeBufferSize"], 
+                    config["DispatchBufferSize"], config["ROBSize"]))
+    
+    count = cursor.fetchone()[0]
+
+    if count == 0:
+        # Insert a new configuration with detailed parameters, timestamp, and status
+        cursor.execute('''INSERT INTO configs (trace, frequency, ifetch_buffer_size, decode_buffer_size, 
+                          dispatch_buffer_size, rob_size, lq_size, sq_size, fetch_width, decode_width, 
+                          dispatch_width, execute_width, lq_width, sq_width, retire_width, scheduler_size, 
+                          branch_predictor, btb, dib_window_size, dib_sets, dib_ways, l1i_sets, l1i_ways, 
+                          l1i_rq_size, l1i_wq_size, l1i_pq_size, l1i_mshr_size, l1i_prefetcher, 
+                          l1d_sets, l1d_ways, l1d_rq_size, l1d_wq_size, l1d_pq_size, l1d_mshr_size, 
+                          l1d_prefetcher, timestamp, status, result, pid, duration, additional_info)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                       (trace, config["Frequency"], config["iFetchBufferSize"], config["DecodeBufferSize"],
+                        config["DispatchBufferSize"], config["ROBSize"], config["LQSize"], config["SQSize"],
+                        config["FetchWidth"], config["DecodeWidth"], config["DispatchWidth"], config["ExecuteWidth"],
+                        config["LQWidth"], config["SQWidth"], config["RetireWidth"], config["SchedulerSize"],
+                        config["BranchPredictor"], config["BTB"], config["DIBWindowSize"], config["DIBSets"], 
+                        config["DIBWays"], config["L1ISets"], config["L1IWays"], config["L1IRQSize"], config["L1IWQSize"], 
+                        config["L1IPQSize"], config["L1IMSHRSize"], config["L1IPrefetcher"], config["L1DSets"], 
+                        config["L1DWays"], config["L1DRQSize"], config["L1DWQSize"], config["L1DPQSize"], 
+                        config["L1DMSHRSize"], config["L1DPrefetcher"], timestamp, status, None, None, None, additional_info))
+        conn.commit()
+
+    conn.close()
+    return count == 0 
+
+# Update the status of the configuration in the database
+def update_config_status(trace, config, status, result=None, pid=None, duration=None):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    cursor.execute('''UPDATE configs SET status = ?, result = ?, pid = ?, duration = ?
+                      WHERE trace = ? AND frequency = ? AND ifetch_buffer_size = ? AND 
+                      decode_buffer_size = ? AND dispatch_buffer_size = ? AND rob_size = ?''',
+                   (status, result, pid, duration, trace, config["Frequency"], config["iFetchBufferSize"], 
+                    config["DecodeBufferSize"], config["DispatchBufferSize"], config["ROBSize"]))
+    
+    conn.commit()
+    conn.close()
+
+# Select a configuration for the architecture
 def select_config(trace):
-    act_encoded = {}
-    db = firestore.Client(project="nth-droplet-407821")
-    trace_name_file = f"{trace}_long"
-    doc_ref = db.collection("champsim").document(trace_name_file)
-    doc = doc_ref.get()
-    if not doc.exists:
-        doc_ref.set({"dummy": "1"})
-    # doc_ref.set({"8_1_2": "1"})
-    found_good_value = False
-    while not found_good_value:
+    with open('ChampSim/mappers.json', 'r') as json_file:
+        mappers = json.load(json_file)
+        act_encoded = {}
 
-        def pull_doc():
-            data_store = db.collection("champsim").document(trace_name_file).get().to_dict()
-            return data_store
+        found_good_value = False
+        while not found_good_value:
+            # Generate random architecture configuration
+            act_encoded["Frequency"] = random.randint(0, len(mappers["frequency_mapper"].keys()) - 1)
+            act_encoded["iFetchBufferSize"] = random.randint(0, len(mappers["ifetch_buffer_size_mapper"].keys()) - 1)
+            act_encoded["DecodeBufferSize"] = random.randint(0, len(mappers["decode_buffer_size_mapper"].keys()) - 1)
+            act_encoded["DispatchBufferSize"] = random.randint(0, len(mappers["dispatch_buffer_size_mapper"].keys()) - 1)
+            act_encoded["ROBSize"] = random.randint(0, len(mappers["rob_size_mapper"].keys()) - 1)
+            act_encoded["LQSize"] = random.randint(0, len(mappers["lq_size_mapper"].keys()) - 1)
+            act_encoded["SQSize"] = random.randint(0, len(mappers["sq_size_mapper"].keys()) - 1)
+            act_encoded["FetchWidth"] = random.randint(0, len(mappers["fetch_width_mapper"].keys()) - 1)
+            act_encoded["DecodeWidth"] = random.randint(0, len(mappers["decode_width_mapper"].keys()) - 1)
+            act_encoded["DispatchWidth"] = random.randint(0, len(mappers["dispatch_width_mapper"].keys()) - 1)
+            act_encoded["ExecuteWidth"] = random.randint(0, len(mappers["execute_width_mapper"].keys()) - 1)
+            act_encoded["LQWidth"] = random.randint(0, len(mappers["lq_width_mapper"].keys()) - 1)
+            act_encoded["SQWidth"] = random.randint(0, len(mappers["sq_width_mapper"].keys()) - 1)
+            act_encoded["RetireWidth"] = random.randint(0, len(mappers["retire_width_mapper"].keys()) - 1)
+            act_encoded["SchedulerSize"] = random.randint(0, len(mappers["scheduler_size_mapper"].keys()) - 1)
+            act_encoded["BranchPredictor"] = random.randint(0, len(mappers["branch_predictor_mapper"].keys()) - 1)
+            act_encoded["BTB"] = random.randint(0, len(mappers["btb_mapper"].keys()) - 1)
+            
+            act_encoded["DIBWindowSize"] = random.randint(0, len(mappers["window_size_mapper"].keys()) - 1)
+            act_encoded["DIBSets"] = random.randint(0, len(mappers["dib_sets_mapper"].keys()) - 1)
+            act_encoded["DIBWays"] = random.randint(0, len(mappers["dib_ways_mapper"].keys()) - 1)
+            
+            act_encoded["L1ISets"] = random.randint(0, len(mappers["l1i_sets_mapper"].keys()) - 1)
+            act_encoded["L1IWays"] = random.randint(0, len(mappers["l1i_ways_mapper"].keys()) - 1)
+            act_encoded["L1IRQSize"] = random.randint(0, len(mappers["l1i_rq_size_mapper"].keys()) - 1)
+            act_encoded["L1IWQSize"] = random.randint(0, len(mappers["l1i_wq_size_mapper"].keys()) - 1)
+            act_encoded["L1IPQSize"] = random.randint(0, len(mappers["l1i_pq_size_mapper"].keys()) - 1)
+            act_encoded["L1IMSHRSize"] = random.randint(0, len(mappers["l1i_mshr_size_mapper"].keys()) - 1)
+            act_encoded["L1IPrefetcher"] = random.randint(0, len(mappers["l1i_prefetcher_mapper"].keys()) - 1)
+            
+            act_encoded["L1DSets"] = random.randint(0, len(mappers["l1d_sets_mapper"].keys()) - 1)
+            act_encoded["L1DWays"] = random.randint(0, len(mappers["l1d_ways_mapper"].keys()) - 1)
+            act_encoded["L1DRQSize"] = random.randint(0, len(mappers["l1d_rq_size_mapper"].keys()) - 1)
+            act_encoded["L1DWQSize"] = random.randint(0, len(mappers["l1d_wq_size_mapper"].keys()) - 1)
+            act_encoded["L1DPQSize"] = random.randint(0, len(mappers["l1d_pq_size_mapper"].keys()) - 1)
+            act_encoded["L1DMSHRSize"] = random.randint(0, len(mappers["l1d_mshr_size_mapper"].keys()) - 1)
+            act_encoded["L1DPrefetcher"] = random.randint(0, len(mappers["l1d_prefetcher_mapper"].keys()) - 1)
+        
+            additional_info = ""
 
-        data_store = pull_doc()
-        # repr(list(act_encoded.values())
-        while (
-            not act_encoded
-            or ("_".join([str(i) for i in list(act_encoded.values())]) + ".txt")
-            in data_store
-        ):
-            act_encoded["Frequency"] = random.randint(
-                0, len(frequency_mapper.keys()) - 1
-            )
-            act_encoded["iFetchBufferSize"] = random.randint(
-                0, len(ifetch_buffer_size_mapper.keys()) - 1
-            )
-            act_encoded["DecodeBufferSize"] = random.randint(
-                0, len(decode_buffer_size_mapper.keys()) - 1
-            )
-            act_encoded["DispatchBufferSize"] = random.randint(
-                0, len(dispatch_buffer_size_mapper.keys()) - 1
-            )
-            act_encoded["ROBSize"] = random.randint(0, len(rob_size_mapper.keys()) - 1)
-            act_encoded["LQSize"] = random.randint(0, len(lq_size_mapper.keys()) - 1)
-            act_encoded["SQSize"] = random.randint(0, len(sq_size_mapper.keys()) - 1)
-            act_encoded["FetchWidth"] = random.randint(
-                0, len(fetch_width_mapper.keys()) - 1
-            )
-            act_encoded["DecodeWidth"] = random.randint(
-                0, len(decode_width_mapper.keys()) - 1
-            )
-            act_encoded["DispatchWidth"] = random.randint(
-                0, len(dispatch_width_mapper.keys()) - 1
-            )
-            act_encoded["ExecuteWidth"] = random.randint(
-                0, len(execute_width_mapper.keys()) - 1
-            )
-            act_encoded["LQWidth"] = random.randint(0, len(lq_width_mapper.keys()) - 1)
-            act_encoded["SQWidth"] = random.randint(0, len(sq_width_mapper.keys()) - 1)
-            act_encoded["RetireWidth"] = random.randint(
-                0, len(retire_width_mapper.keys()) - 1
-            )
-            act_encoded["SchedulerSize"] = random.randint(
-                0, len(scheduler_size_mapper.keys()) - 1
-            )
-            act_encoded["BranchPredictor"] = random.randint(
-                0, len(branch_predictor_mapper.keys()) - 1
-            )
-            act_encoded["BTB"] = random.randint(0, len(btb_mapper.keys()) - 1)
-            act_encoded["DIBWindowSize"] = random.randint(
-                0, len(window_size_mapper.keys()) - 1
-            )
-            act_encoded["DIBSets"] = random.randint(0, len(dib_sets_mapper.keys()) - 1)
-            act_encoded["DIBWays"] = random.randint(0, len(dib_ways_mapper.keys()) - 1)
-            act_encoded["L1ISets"] = random.randint(0, len(l1i_sets_mapper.keys()) - 1)
-            act_encoded["L1IWays"] = random.randint(0, len(l1i_ways_mapper.keys()) - 1)
-            act_encoded["L1IRQSize"] = random.randint(
-                0, len(l1i_rq_size_mapper.keys()) - 1
-            )
-            act_encoded["L1IWQSize"] = random.randint(
-                0, len(l1i_wq_size_mapper.keys()) - 1
-            )
-            act_encoded["L1IPQSize"] = random.randint(
-                0, len(l1i_pq_size_mapper.keys()) - 1
-            )
-            act_encoded["L1IMSHRSize"] = random.randint(
-                0, len(l1i_mshr_size_mapper.keys()) - 1
-            )
-            act_encoded["L1IPrefetcher"] = random.randint(
-                0, len(l1i_prefetcher_mapper.keys()) - 1
-            )
-            act_encoded["L1DSets"] = random.randint(0, len(l1d_sets_mapper.keys()) - 1)
-            act_encoded["L1DWays"] = random.randint(0, len(l1d_ways_mapper.keys()) - 1)
-            act_encoded["L1DRQSize"] = random.randint(
-                0, len(l1d_rq_size_mapper.keys()) - 1
-            )
-            act_encoded["L1DWQSize"] = random.randint(
-                0, len(l1d_wq_size_mapper.keys()) - 1
-            )
-            act_encoded["L1DPQSize"] = random.randint(
-                0, len(l1d_pq_size_mapper.keys()) - 1
-            )
-            act_encoded["L1DMSHRSize"] = random.randint(
-                0, len(l1d_mshr_size_mapper.keys()) - 1
-            )
-            act_encoded["L1DPrefetcher"] = random.randint(
-                0, len(l1d_prefetcher_mapper.keys()) - 1
-            )
-        data_store_1 = pull_doc()
-        # breakpoint()
-        if repr(list(act_encoded.values())) not in data_store_1.keys():
-            doc_ref = db.collection("champsim").document(trace_name_file)
-            data_store_1[repr(list(act_encoded.values()))] = "1"
-            doc_ref.set(data_store_1)
-            found_good_value = True
-            break
-        break
+            # Saves configuration with non-decoded values
+            found_good_value = save_config_to_db(trace, act_encoded, additional_info)
 
-    act_decoded = decode(act_encoded)
-    write_to_json(act_decoded)
-    return act_encoded
+        print("Found a good configuration")
+        act_decoded = decode(act_encoded, mappers)
+        write_to_json(act_decoded, trace)
+        return act_encoded
 
-
-def write_to_json(action):
-    champsim_ctrl_file = "champsim_config.json"
-    with open(champsim_ctrl_file, "r") as JsonFile:
+# Write the configuration to a JSON file for ChampSim
+def write_to_json(action, trace):
+    champsim_ctrl_file = "champsim_config_" + trace + "_" + str(os.getpid()) + ".json"
+    with open("ChampSim/starter_champsim_config.json", "r+") as JsonFile:
         data = json.load(JsonFile)
         data["ooo_cpu"][0]["frequency"] = action["Frequency"]
         data["ooo_cpu"][0]["ifetch_buffer_size"] = action["iFetchBufferSize"]
@@ -332,33 +276,27 @@ def write_to_json(action):
         data["L1D"]["pq_size"] = action["L1DPQSize"]
         data["L1D"]["mshr_size"] = action["L1DMSHRSize"]
         data["L1D"]["prefetcher"] = action["L1DPrefetcher"]
-        with open(champsim_ctrl_file, "w") as JsonFile:
+        with open("ChampSim/champsim_configs/" + champsim_ctrl_file, "w+") as JsonFile:
             json.dump(data, JsonFile, indent=4)
 
-
+# Run the ChampSim program with the selected configuration
 def run_program(iter, action_dict, trace):
     def current_datetime_to_numeric_representation():
-        # Use a reference datetime (e.g., epoch)
         reference_datetime = datetime(2022, 1, 1)
-
-        # Get the current datetime
         current_datetime = datetime.now()
-
-        # Calculate total seconds elapsed since the reference datetime
         total_seconds = (current_datetime - reference_datetime).total_seconds()
-
         return total_seconds
 
-    # Example usage:
-    # numeric_representation = str(current_datetime_to_numeric_representation())
-    name = list(action_dict.values())
-    name = [str(n) for n in name]
-    name = "_".join(name)
+    name = trace + "_" + str(os.getpid())
+    binary_name = f"champsim_{trace}_" + str(os.getpid())
     trace_fp = f"traces/{trace}"
+    # Configure the program with the selected configuration
+    print("Configuring ChampSim with provided configuration")
     process = subprocess.Popen(
-        ["./config.sh", "champsim_config.json"],
+        ["./config.sh", "champsim_configs/champsim_config_" + trace + "_" + str(os.getpid()) + ".json"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        cwd=(os.getcwd() + "/ChampSim")
     )
     out, err = process.communicate()
     if err.decode() == "":
@@ -366,8 +304,10 @@ def run_program(iter, action_dict, trace):
     else:
         print(err.decode())
         sys.exit()
+    # Compile ChampSim
+    print("Compiling ChampSim")
     process = subprocess.Popen(
-        ["make", "-j2"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ["make", "BINARY_NAME=" + binary_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=(os.getcwd() + "/ChampSim")
     )
     out, err = process.communicate()
     if "error" not in err.decode():
@@ -377,213 +317,70 @@ def run_program(iter, action_dict, trace):
         print(action_dict)
         sys.exit()
     print("Done configuring/making config")
-    output_json_dir = f"output_json_long_{trace}"
-    output_logs_dir = f"output_logs_long_{trace}"
-    if not os.path.exists(output_json_dir):
-        # Create the directory
-        os.makedirs(output_json_dir)
-    if not os.path.exists(output_logs_dir):
-        # Create the directory
-        os.makedirs(output_logs_dir)
+    output_json_dir = f"output/json_long_{trace}_" + str(os.getpid())
+    output_logs_dir = f"output/logs_long_{trace}_" + str(os.getpid())
+    if not os.path.exists("ChampSim/" + output_json_dir):
+        os.makedirs("ChampSim/" + output_json_dir)
+    if not os.path.exists("ChampSim/" + output_logs_dir):
+        os.makedirs("ChampSim/" + output_logs_dir)
     start_time = time.time()
+    # Run the program with the selected configuration
+    print("Running ChampSim with provided configuration and trace")
+    update_config_status(trace, action_dict, "running", pid=os.getpid())
     process = subprocess.Popen(
         [
-            "./bin/champsim",
+            "./bin/" + binary_name,
             "-w",
             "0",
             "--simulation-instructions",
-            "700000000",
+            str(SIM_INSTRUCTIONS),
             trace_fp,
             "--json",
             f"{output_json_dir}/{name}.json",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        cwd=(os.getcwd() + "/ChampSim")
     )
     out, err = process.communicate()
     print("Done running program, time to run:", (time.time() - start_time) / 60)
+    update_config_status(trace, action_dict, "completed", result="Success", pid=os.getpid(), duration=(time.time() - start_time) / 60)
     if err.decode() == "":
         outstream = out.decode()
     else:
+        update_config_status(trace, action_dict, "error", result=err.decode())
         print(err.decode())
         print(print(action_dict))
-        # sys.exit()
     if len(outstream) < 100:
         print(outstream)
-    txt_file_path = f"{output_logs_dir}/{name}.txt"
-    json_file_path = f"{output_json_dir}/{name}.json"
-    with open(f"{output_logs_dir}/{name}.txt", "w+") as file:
-        file.write(outstream)
-    with open(f"{output_json_dir}/{name}.json", "r") as json_file:
-        json_data = json.load(json_file)
+    # Store the output to a text and JSON files
+    txt_file_path = f"ChampSim/{output_logs_dir}/{name}.txt"
+    with open(txt_file_path, "w+") as txt_file:
+        txt_file.write(outstream)
 
-    client = storage.Client(
-        project="nth-droplet-407821"
-    )  # storage.Client.from_service_account_json('nth-droplet-407821-515306f939e3.json')
-
-    # Specify the bucket name and document path
-    bucket_name = "champsim"
-
-    # Get a reference to the bucket
-    bucket = client.bucket(bucket_name)
-
-    # Upload the document from the local file
-    json_blob = bucket.blob(json_file_path)
-    json_blob.upload_from_filename(json_file_path)
-
-    txt_blob = bucket.blob(txt_file_path)
-    txt_blob.upload_from_filename(txt_file_path)
-    # data_store[name] = parse_output(json_data, outstream)
     print("Done storing everything")
 
-
-# try:
-#     with open('champsim_data.pickle', 'rb') as handle:
-#         data_store = pickle.load(handle)
-# except:
-#     data_store = {}
-
-"""
-import subprocess
-import os
-
-def download_with_subprocess(url, destination_file=None):
-    if destination_file is None:
-        destination_file = os.path.basename(url)  # Use the filename from the URL
-
-    wget_command = ['wget', url, '-O', destination_file]
-    subprocess.run(wget_command) 
-
-# Example
-url = "https://www.example.com/images/sample_image.jpg"
-download_with_subprocess(url) 
-
-"""
-def download_with_subprocess(url, destination_file=None):
-    if destination_file is None:
-        destination_file = os.path.basename(url)  # Use the filename from the URL
-
-    wget_command = ['wget', url, '-O', destination_file]
-    subprocess.run(wget_command) 
-
-def main(iter, trace):
-    action_dict = select_config(trace)
-    run_program(iter, action_dict, trace)
-import random
-
+# TODO: Get traces from specified directory
 traces = [
-    "400.perlbench-41B.champsimtrace.xz",
-    #"400.perlbench-50B.champsimtrace.xz",
-    "401.bzip2-226B.champsimtrace.xz",
-    #"401.bzip2-277B.champsimtrace.xz",
-    #"401.bzip2-38B.champsimtrace.xz",
-    #"401.bzip2-7B.champsimtrace.xz",
-    "403.gcc-16B.champsimtrace.xz",
-    # "403.gcc-17B.champsimtrace.xz",
-    # "403.gcc-48B.champsimtrace.xz",
-    "410.bwaves-1963B.champsimtrace.xz",
-    # "410.bwaves-2097B.champsimtrace.xz",
-    # "410.bwaves-945B.champsimtrace.xz",
-    "416.gamess-875B.champsimtrace.xz",
-    "429.mcf-184B.champsimtrace.xz",
-    # "429.mcf-192B.champsimtrace.xz",
-    # "429.mcf-217B.champsimtrace.xz",
-    # "429.mcf-22B.champsimtrace.xz",
-    "429.mcf-51B.champsimtrace.xz",
-    "433.milc-127B.champsimtrace.xz",
-    # "433.milc-274B.champsimtrace.xz",
-    # "433.milc-337B.champsimtrace.xz",
-    "434.zeusmp-10B.champsimtrace.xz",
-    "435.gromacs-111B.champsimtrace.xz",
-    # "435.gromacs-134B.champsimtrace.xz",
-    # "435.gromacs-226B.champsimtrace.xz",
-    # "435.gromacs-228B.champsimtrace.xz",
-    "436.cactusADM-1804B.champsimtrace.xz",
-    "437.leslie3d-134B.champsimtrace.xz",
-    # "437.leslie3d-149B.champsimtrace.xz",
-    # "437.leslie3d-232B.champsimtrace.xz",
-    # "437.leslie3d-265B.champsimtrace.xz",
-    # "437.leslie3d-271B.champsimtrace.xz",
-    "437.leslie3d-273B.champsimtrace.xz",
-    "444.namd-120B.champsimtrace.xz",
-    # "444.namd-166B.champsimtrace.xz",
-    # "444.namd-23B.champsimtrace.xz",
-    # "444.namd-321B.champsimtrace.xz",
-    # "444.namd-33B.champsimtrace.xz",
-    # "444.namd-426B.champsimtrace.xz",
-    # "444.namd-44B.champsimtrace.xz",
-    "445.gobmk-17B.champsimtrace.xz",
-    # "445.gobmk-2B.champsimtrace.xz",
-    # "445.gobmk-30B.champsimtrace.xz",
-    # "445.gobmk-36B.champsimtrace.xz",
-    "447.dealII-3B.champsimtrace.xz",
-    "450.soplex-247B.champsimtrace.xz",
-    "450.soplex-92B.champsimtrace.xz",
-    "453.povray-252B.champsimtrace.xz",
-    # "453.povray-576B.champsimtrace.xz",
-    # "453.povray-800B.champsimtrace.xz",
-    # "453.povray-887B.champsimtrace.xz",
-    "454.calculix-104B.champsimtrace.xz",
-    #"454.calculix-460B.champsimtrace.xz",
-    "456.hmmer-191B.champsimtrace.xz",
-    # "456.hmmer-327B.champsimtrace.xz",
-    # "456.hmmer-88B.champsimtrace.xz",
-    "458.sjeng-1088B.champsimtrace.xz",
-    # "458.sjeng-283B.champsimtrace.xz",
-    # "458.sjeng-31B.champsimtrace.xz",
-    "458.sjeng-767B.champsimtrace.xz",
-    "459.GemsFDTD-1169B.champsimtrace.xz",
-    # "459.GemsFDTD-1211B.champsimtrace.xz",
-    # "459.GemsFDTD-1320B.champsimtrace.xz",
-    # "459.GemsFDTD-1418B.champsimtrace.xz",
-    # "459.GemsFDTD-1491B.champsimtrace.xz",
-    # "459.GemsFDTD-765B.champsimtrace.xz",
-    "462.libquantum-1343B.champsimtrace.xz",
-    #"462.libquantum-714B.champsimtrace.xz",
-    "464.h264ref-30B.champsimtrace.xz",
-    # "464.h264ref-57B.champsimtrace.xz",
-    # "464.h264ref-64B.champsimtrace.xz",
-    # "464.h264ref-97B.champsimtrace.xz",
-    "465.tonto-1914B.champsimtrace.xz",
-    #"465.tonto-44B.champsimtrace.xz",
-    "470.lbm-1274B.champsimtrace.xz",
-    "471.omnetpp-188B.champsimtrace.xz",
-    "473.astar-153B.champsimtrace.xz",
-    #"473.astar-359B.champsimtrace.xz",
-    #"473.astar-42B.champsimtrace.xz",
-    "481.wrf-1170B.champsimtrace.xz",
-    # "481.wrf-1254B.champsimtrace.xz",
-    # "481.wrf-1281B.champsimtrace.xz",
-    # "481.wrf-196B.champsimtrace.xz",
-    # "481.wrf-455B.champsimtrace.xz",
-    # "481.wrf-816B.champsimtrace.xz",
-    "482.sphinx3-1100B.champsimtrace.xz",
-    # "482.sphinx3-1297B.champsimtrace.xz",
-    # "482.sphinx3-1395B.champsimtrace.xz",
-    # "482.sphinx3-1522B.champsimtrace.xz",
-    # "482.sphinx3-234B.champsimtrace.xz",
-    # "482.sphinx3-417B.champsimtrace.xz",
-    "483.xalancbmk-127B.champsimtrace.xz",
-    "483.xalancbmk-716B.champsimtrace.xz",
-    #"483.xalancbmk-736B.champsimtrace.xz",
+    "481.wrf-1170B.champsimtrace.xz"
 ]
-random.shuffle(traces)
 
-for trace in traces:
-    url = f"https://dpc3.compas.cs.stonybrook.edu/champsim-traces/speccpu/{trace}"
-    trace_fp = f"traces/{trace}"
-    download_with_subprocess(url, trace_fp)
-    for i in range(2):
-        print(i)
-        try:
-            main(i, trace)
-        except KeyboardInterrupt:
-            # quit
-            sys.exit()
-        except Exception as ex:
-            print("ERROR:", ex)
-            continue
-    os.remove(trace_fp) # clean up the folder so we don't have all the traces
+def main():
+    random.shuffle(traces)
+    initialize_db()
 
-# with open("champsim_data.pickle", "wb+") as handle:
-#     pickle.dump(data_store, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    for trace in traces:
+        for i in range(1):
+            try:
+                print("Trace:", trace)
+                print("Selecting configuration...")
+                action_dict = select_config(trace)
+                run_program(iter, action_dict, trace)
+            except KeyboardInterrupt:
+                sys.exit()
+            except Exception as ex:
+                print("ERROR:", ex)
+                continue
+
+if __name__ == "__main__":
+    main()

@@ -1,4 +1,5 @@
 ROOT_DIR = $(patsubst %/,%,$(dir $(abspath $(firstword $(MAKEFILE_LIST)))))
+BINARY_NAME ?= $@
 
 CPPFLAGS += -MMD -I$(ROOT_DIR)/inc
 CXXFLAGS += --std=c++17 -O3 -Wall -Wextra -Wshadow -Wpedantic
@@ -59,7 +60,8 @@ $(test_main_name):
 
 # Link main executables
 $(filter-out $(test_main_name), $(executable_name)):
-	$(LINK.cc) $(LDFLAGS) -o $@ $^ $(LOADLIBES) $(LDLIBS)
+	@mkdir -p $(ROOT_DIR)/bin
+	$(LINK.cc) $(LDFLAGS) -o $(ROOT_DIR)/bin/$(BINARY_NAME) $^ $(LOADLIBES) $(LDLIBS)
 
 # Tests: build and run
 test: $(test_main_name)
