@@ -7,7 +7,7 @@ import time
 import os
 import sqlite3
 
-SIM_INSTRUCTIONS = 700000000
+SIM_INSTRUCTIONS = json.load(open("../config.json"))["SIM_INSTRUCTIONS"]
 DB_FILE = "../champsim_configs.db"
 TRACE_DIR = json.load(open("../config.json"))["TRACE_DIR"]
 
