@@ -7,9 +7,9 @@ import time
 import os
 import sqlite3
 
-SIM_INSTRUCTIONS = 1000000
-DB_FILE = "ChampSim/champsim_configs.db"
-TRACE_DIR = "traces"
+SIM_INSTRUCTIONS = 700000000
+DB_FILE = "../champsim_configs.db"
+TRACE_DIR = json.load(open("../config.json"))["TRACE_DIR"]
 
 # Initialize the database which stores already run configurations
 def initialize_db():
@@ -179,7 +179,7 @@ def update_config_status(trace, config, status, result=None, pid=None, duration=
 
 # Select a configuration for the architecture
 def select_config(trace):
-    with open('ChampSim/mappers.json', 'r') as json_file:
+    with open('mappers.json', 'r') as json_file:
         mappers = json.load(json_file)
         act_encoded = {}
 
@@ -237,7 +237,7 @@ def select_config(trace):
 # Write the configuration to a JSON file for ChampSim
 def write_to_json(action, trace):
     champsim_ctrl_file = "champsim_config_" + trace + "_" + str(os.getpid()) + ".json"
-    with open("ChampSim/starter_champsim_config.json", "r+") as JsonFile:
+    with open("starter_champsim_config.json", "r+") as JsonFile:
         data = json.load(JsonFile)
         data["ooo_cpu"][0]["frequency"] = action["Frequency"]
         data["ooo_cpu"][0]["ifetch_buffer_size"] = action["iFetchBufferSize"]
@@ -276,11 +276,11 @@ def write_to_json(action, trace):
         data["L1D"]["pq_size"] = action["L1DPQSize"]
         data["L1D"]["mshr_size"] = action["L1DMSHRSize"]
         data["L1D"]["prefetcher"] = action["L1DPrefetcher"]
-        with open("ChampSim/champsim_configs/" + champsim_ctrl_file, "w+") as JsonFile:
+        with open("champsim_configs/" + champsim_ctrl_file, "w+") as JsonFile:
             json.dump(data, JsonFile, indent=4)
 
 # Run the ChampSim program with the selected configuration
-def run_program(iter, action_dict, trace):
+def run_program(iter, action_dict, trace, trace_fp):
     def current_datetime_to_numeric_representation():
         reference_datetime = datetime(2022, 1, 1)
         current_datetime = datetime.now()
@@ -289,14 +289,12 @@ def run_program(iter, action_dict, trace):
 
     name = trace + "_" + str(os.getpid())
     binary_name = f"champsim_{trace}_" + str(os.getpid())
-    trace_fp = f"traces/{trace}"
     # Configure the program with the selected configuration
     print("Configuring ChampSim with provided configuration")
     process = subprocess.Popen(
         ["./config.sh", "champsim_configs/champsim_config_" + trace + "_" + str(os.getpid()) + ".json"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        cwd=(os.getcwd() + "/ChampSim")
     )
     out, err = process.communicate()
     if err.decode() == "":
@@ -307,7 +305,7 @@ def run_program(iter, action_dict, trace):
     # Compile ChampSim
     print("Compiling ChampSim")
     process = subprocess.Popen(
-        ["make", "BINARY_NAME=" + binary_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=(os.getcwd() + "/ChampSim")
+        ["make", "BINARY_NAME=" + binary_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
     out, err = process.communicate()
     if "error" not in err.decode():
@@ -319,10 +317,10 @@ def run_program(iter, action_dict, trace):
     print("Done configuring/making config")
     output_json_dir = f"output/json_long_{trace}_" + str(os.getpid())
     output_logs_dir = f"output/logs_long_{trace}_" + str(os.getpid())
-    if not os.path.exists("ChampSim/" + output_json_dir):
-        os.makedirs("ChampSim/" + output_json_dir)
-    if not os.path.exists("ChampSim/" + output_logs_dir):
-        os.makedirs("ChampSim/" + output_logs_dir)
+    if not os.path.exists(output_json_dir):
+        os.makedirs(output_json_dir)
+    if not os.path.exists(output_logs_dir):
+        os.makedirs(output_logs_dir)
     start_time = time.time()
     # Run the program with the selected configuration
     print("Running ChampSim with provided configuration and trace")
@@ -339,8 +337,7 @@ def run_program(iter, action_dict, trace):
             f"{output_json_dir}/{name}.json",
         ],
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        cwd=(os.getcwd() + "/ChampSim")
+        stderr=subprocess.PIPE
     )
     out, err = process.communicate()
     print("Done running program, time to run:", (time.time() - start_time) / 60)
@@ -354,33 +351,32 @@ def run_program(iter, action_dict, trace):
     if len(outstream) < 100:
         print(outstream)
     # Store the output to a text and JSON files
-    txt_file_path = f"ChampSim/{output_logs_dir}/{name}.txt"
+    txt_file_path = f"{output_logs_dir}/{name}.txt"
     with open(txt_file_path, "w+") as txt_file:
         txt_file.write(outstream)
 
     print("Done storing everything")
 
 # TODO: Get traces from specified directory
-traces = [
-    "481.wrf-1170B.champsimtrace.xz"
-]
+traces = os.listdir(TRACE_DIR)
 
 def main():
     random.shuffle(traces)
     initialize_db()
 
-    for trace in traces:
-        for i in range(1):
-            try:
-                print("Trace:", trace)
-                print("Selecting configuration...")
-                action_dict = select_config(trace)
-                run_program(iter, action_dict, trace)
-            except KeyboardInterrupt:
-                sys.exit()
-            except Exception as ex:
-                print("ERROR:", ex)
-                continue
+    for (iter, trace) in enumerate(traces):
+        if iter == 1:
+            for i in range(1):
+                try:
+                    print("Trace:", trace)
+                    print("Selecting configuration...")
+                    action_dict = select_config(trace)
+                    run_program(iter, action_dict, trace, TRACE_DIR + trace)
+                except KeyboardInterrupt:
+                    sys.exit()
+                except Exception as ex:
+                    print("ERROR:", ex)
+                    continue
 
 if __name__ == "__main__":
     main()

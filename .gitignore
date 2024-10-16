@@ -22,3 +22,9 @@ output/**
 champsim_configs/**
 
 champsim_configs.db
+
+.env
+
+output_*.log
+
+run_champsim_*.sh
