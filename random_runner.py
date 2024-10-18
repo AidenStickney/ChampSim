@@ -34,6 +34,9 @@ duration_secs=$((end_time - start_time))
 duration_mins=$((duration_secs / 60))
 
 python3 update_status.py {trace} {freq} {ifetch} {decode} {dispatch} {rob} completed Success $duration_mins
+
+# Remove the batch script
+rm -- "$0"
 """
 
 # Initialize the database which stores already run configurations
@@ -421,6 +424,8 @@ traces = os.listdir(TRACE_DIR)
 def main():
     global traces
     initialize_db()
+
+    traces.sort()
 
     # Offset the traces to run
     traces = traces[TRACES_OFFSET:]
