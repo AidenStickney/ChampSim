@@ -32,6 +32,7 @@ if __name__ == "__main__":
     result = sys.argv[8] if len(sys.argv) > 8 else None
     duration = sys.argv[9] if len(sys.argv) > 9 else None
 
-    print("Duration received by update_status.py: ", duration)
+    if len(sys.argv) < 7:
+        print("Invalid number of arguments.")
 
     update_config_status(trace, config, status, result, duration)

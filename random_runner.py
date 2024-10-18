@@ -274,7 +274,7 @@ def select_config():
             # Saves configuration with non-decoded values
             found_good_value = check_config_in_db(act_encoded)
 
-        print("Found a good configuration")
+        print("\tFound a good configuration")
         act_decoded = decode(act_encoded, mappers)
         write_to_json(act_decoded)
         return act_encoded
@@ -358,7 +358,7 @@ def setup_champsim(action_dict):
     # name = trace + "_" + str(os.getpid())
     binary_name = f"run_champsim"
     # Configure the program with the selected configuration
-    print("Configuring ChampSim with provided configuration")
+    print("\tConfiguring ChampSim with provided configuration")
     process = subprocess.Popen(
         ["./config.sh", "champsim_config.json"],
         stdout=subprocess.PIPE,
@@ -368,10 +368,10 @@ def setup_champsim(action_dict):
     if err.decode() == "":
         outstream = out.decode()
     else:
-        print(err.decode())
+        print("\t", err.decode())
         sys.exit()
     # Compile ChampSim
-    print("Compiling ChampSim")
+    print("\tCompiling ChampSim")
     process = subprocess.Popen(
         ["make", "BINARY_NAME=" + binary_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
@@ -379,10 +379,10 @@ def setup_champsim(action_dict):
     if "error" not in err.decode():
         outstream = out.decode()
     else:
-        print(err.decode())
-        print(action_dict)
+        print("\t", err.decode())
+        print("\t", action_dict)
         sys.exit()
-    print("Done configuring/making config")
+    print("\tDone configuring/making config")
     # update_config_status(trace, action_dict, "running", pid=os.getpid())
     # process = subprocess.Popen(
     #     [
@@ -419,19 +419,20 @@ def setup_champsim(action_dict):
 traces = os.listdir(TRACE_DIR)
 
 def main():
+    global traces
     initialize_db()
 
     # Offset the traces to run
     traces = traces[TRACES_OFFSET:]
 
-    print("Selecting configuration...")
+    print("\tSelecting configuration...")
     action_dict = select_config()
     setup_champsim(action_dict)
 
     for (iter, trace) in enumerate(traces):
         if iter < TRACES_TO_RUN:
             try:
-                print("Trace:", trace)
+                print("\t\tCreating batch job for trace:", trace)
                 # Set up the batch job for each trace
                 trace_fp = f"{TRACE_DIR}/{trace}"
                 create_batch_job(os.getcwd(), trace, trace_fp, action_dict)
@@ -439,7 +440,7 @@ def main():
             except KeyboardInterrupt:
                 sys.exit()
             except Exception as ex:
-                print("ERROR:", ex)
+                print("\t\tERROR creating batch job for trace:", trace, "\n\t\t", ex)
                 continue
 
 if __name__ == "__main__":
