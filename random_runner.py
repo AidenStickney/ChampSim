@@ -6,6 +6,7 @@ from datetime import datetime
 import time
 import math
 import os
+import re
 import sqlite3
 
 # Configuration parameters
@@ -364,6 +365,19 @@ def create_batch_job(repo_path, trace, trace_fp, config):
     with open(script_path, "w") as script_file:
         script_file.write(slurm_script)
 
+def run_command(command):
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+    
+    if result.stdout:
+        for line in result.stdout.splitlines():
+            print(f"\t{line}")
+    
+    if result.stderr:
+        for line in result.stderr.splitlines():
+            print(f"\t{line}")
+    
+    return result
+
 # Run the ChampSim program with the selected configuration
 def setup_champsim(action_dict):
     def current_datetime_to_numeric_representation():
@@ -382,23 +396,29 @@ def setup_champsim(action_dict):
         stderr=subprocess.PIPE,
     )
     out, err = process.communicate()
-    if err.decode() == "":
-        outstream = out.decode()
-    else:
-        print("\t", err.decode())
-        sys.exit()
+    if err.decode().strip():
+        for line in err.decode().splitlines():
+            print(f"\t{line}")
+        sys.exit(1)
+    # if out.decode().strip():
+    #     outstream = out.decode()
+    #     for line in outstream.splitlines():
+    #         print(f"\t{line}")
     # Compile ChampSim
     print("\tCompiling ChampSim")
     process = subprocess.Popen(
         ["make", "BINARY_NAME=" + binary_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
     out, err = process.communicate()
-    if "error" not in err.decode():
-        outstream = out.decode()
-    else:
-        print("\t", err.decode())
-        print("\t", action_dict)
-        sys.exit()
+    if "error" in err.decode().lower():
+        for line in err.decode().splitlines():
+            print(f"\t{line}")
+        print(f"\t{action_dict}")
+        sys.exit(1)
+    # if out.decode().strip():
+    #     outstream = out.decode()
+    #     for line in outstream.splitlines():
+    #         print(f"\t{line}")
     print("\tDone configuring/making config")
     # update_config_status(trace, action_dict, "running", pid=os.getpid())
     # process = subprocess.Popen(
@@ -433,13 +453,17 @@ def setup_champsim(action_dict):
 
     # print("Done storing everything")
 
+def extract_number_from_trace(filename):
+    match = re.search(r'_(\d+)\.champsimtrace\.xz$', filename)
+    return int(match.group(1)) if match else -1
+
 traces = os.listdir(TRACE_DIR)
 
 def main():
     global traces
     initialize_db()
 
-    traces.sort()
+    traces.sort(key=extract_number_from_trace)
 
     # Offset the traces to run
     traces = traces[TRACES_OFFSET:]
