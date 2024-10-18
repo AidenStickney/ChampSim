@@ -4,12 +4,37 @@ import subprocess
 import sys
 from datetime import datetime
 import time
+import math
 import os
 import sqlite3
 
+# Configuration parameters
 SIM_INSTRUCTIONS = json.load(open("../config.json"))["SIM_INSTRUCTIONS"]
-DB_FILE = "../champsim_configs.db"
+DB_FILE = json.load(open("../config.json"))["DB_FILE"]
+TRACES_TO_RUN = json.load(open("../config.json"))["TRACES_TO_RUN"]
+TRACES_OFFSET = json.load(open("../config.json"))["TRACES_OFFSET"]
 TRACE_DIR = json.load(open("../config.json"))["TRACE_DIR"]
+WALL_TIME = json.load(open("../config.json"))["WALL_TIME"]
+MEM_SIZE_PER_JOB_MB = json.load(open("../config.json"))["MEM_SIZE_PER_JOB_MB"]
+SLURM_TEMPLATE = """#!/bin/bash
+#SBATCH --job-name=champsim_{trace}_{iter}   # Job name
+#SBATCH --ntasks=1                         # Run a single task
+#SBATCH --time={dur}                    # Time limit hrs:min:sec
+#SBATCH --output=output/logs_long_{trace}.log  # Standard output and error log
+#SBATCH --mem={mem}MB                      # Job memory request
+
+module load GCCcore CMake git  # Load necessary modules
+cd {repo_path}  # Navigate to the correct ChampSim repo
+
+# Get time before running the program
+start_time=$(date +%s)
+./bin/run_champsim -w 0 --simulation-instructions {sim_instructions} {trace_fp} --json output/json_long_{trace}.json
+end_time=$(date +%s)
+duration_secs=$((end_time - start_time))
+duration_mins=$((duration_secs / 60))
+
+python3 update_status.py {trace} {freq} {ifetch} {decode} {dispatch} {rob} completed Success $duration_mins
+"""
 
 # Initialize the database which stores already run configurations
 def initialize_db():
@@ -52,10 +77,10 @@ def initialize_db():
                         l1d_pq_size INTEGER,
                         l1d_mshr_size INTEGER,
                         l1d_prefetcher TEXT,
+                        directory TEXT,
                         timestamp TEXT,
                         status TEXT,
                         result TEXT,
-                        pid INTEGER,
                         duration REAL,
                         additional_info TEXT,
                         PRIMARY KEY (trace, frequency, ifetch_buffer_size, decode_buffer_size, dispatch_buffer_size)
@@ -147,7 +172,7 @@ def save_config_to_db(trace, config, additional_info=None):
                           branch_predictor, btb, dib_window_size, dib_sets, dib_ways, l1i_sets, l1i_ways, 
                           l1i_rq_size, l1i_wq_size, l1i_pq_size, l1i_mshr_size, l1i_prefetcher, 
                           l1d_sets, l1d_ways, l1d_rq_size, l1d_wq_size, l1d_pq_size, l1d_mshr_size, 
-                          l1d_prefetcher, timestamp, status, result, pid, duration, additional_info)
+                          l1d_prefetcher, directory, timestamp, status, result, duration, additional_info)
                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                        (trace, config["Frequency"], config["iFetchBufferSize"], config["DecodeBufferSize"],
                         config["DispatchBufferSize"], config["ROBSize"], config["LQSize"], config["SQSize"],
@@ -157,28 +182,48 @@ def save_config_to_db(trace, config, additional_info=None):
                         config["DIBWays"], config["L1ISets"], config["L1IWays"], config["L1IRQSize"], config["L1IWQSize"], 
                         config["L1IPQSize"], config["L1IMSHRSize"], config["L1IPrefetcher"], config["L1DSets"], 
                         config["L1DWays"], config["L1DRQSize"], config["L1DWQSize"], config["L1DPQSize"], 
-                        config["L1DMSHRSize"], config["L1DPrefetcher"], timestamp, status, None, None, None, additional_info))
+                        config["L1DMSHRSize"], config["L1DPrefetcher"], os.getcwd().split("/")[-1],
+                        timestamp, status, None, None, additional_info))
         conn.commit()
 
     conn.close()
     return count == 0 
 
-# Update the status of the configuration in the database
-def update_config_status(trace, config, status, result=None, pid=None, duration=None):
+# Check if the configuration is already in the database
+def check_config_in_db(config):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
-    cursor.execute('''UPDATE configs SET status = ?, result = ?, pid = ?, duration = ?
-                      WHERE trace = ? AND frequency = ? AND ifetch_buffer_size = ? AND 
-                      decode_buffer_size = ? AND dispatch_buffer_size = ? AND rob_size = ?''',
-                   (status, result, pid, duration, trace, config["Frequency"], config["iFetchBufferSize"], 
-                    config["DecodeBufferSize"], config["DispatchBufferSize"], config["ROBSize"]))
+    cursor.execute('''SELECT COUNT(*) FROM configs WHERE
+                      frequency = ? AND ifetch_buffer_size = ? AND decode_buffer_size = ? AND 
+                      dispatch_buffer_size = ? AND rob_size = ?''', 
+                   (config["Frequency"], config["iFetchBufferSize"], config["DecodeBufferSize"], 
+                    config["DispatchBufferSize"], config["ROBSize"]))
     
-    conn.commit()
+    count = cursor.fetchone()[0]
     conn.close()
 
+    if count == 0:
+        return True
+    else:
+        return False
+
+# Update the status of the configuration in the database
+# def update_config_status(trace, config, status, result=None, duration=None):
+#     conn = sqlite3.connect(DB_FILE)
+#     cursor = conn.cursor()
+
+#     cursor.execute('''UPDATE configs SET status = ?, result = ?, duration = ?
+#                       WHERE trace = ? AND frequency = ? AND ifetch_buffer_size = ? AND 
+#                       decode_buffer_size = ? AND dispatch_buffer_size = ? AND rob_size = ?''',
+#                    (status, result, duration, trace, config["Frequency"], config["iFetchBufferSize"], 
+#                     config["DecodeBufferSize"], config["DispatchBufferSize"], config["ROBSize"]))
+    
+#     conn.commit()
+#     conn.close()
+
 # Select a configuration for the architecture
-def select_config(trace):
+def select_config():
     with open('mappers.json', 'r') as json_file:
         mappers = json.load(json_file)
         act_encoded = {}
@@ -227,16 +272,16 @@ def select_config(trace):
             additional_info = ""
 
             # Saves configuration with non-decoded values
-            found_good_value = save_config_to_db(trace, act_encoded, additional_info)
+            found_good_value = check_config_in_db(act_encoded)
 
         print("Found a good configuration")
         act_decoded = decode(act_encoded, mappers)
-        write_to_json(act_decoded, trace)
+        write_to_json(act_decoded)
         return act_encoded
 
 # Write the configuration to a JSON file for ChampSim
-def write_to_json(action, trace):
-    champsim_ctrl_file = "champsim_config_" + trace + "_" + str(os.getpid()) + ".json"
+def write_to_json(action):
+    champsim_ctrl_file = "champsim_config.json"
     with open("starter_champsim_config.json", "r+") as JsonFile:
         data = json.load(JsonFile)
         data["ooo_cpu"][0]["frequency"] = action["Frequency"]
@@ -276,23 +321,46 @@ def write_to_json(action, trace):
         data["L1D"]["pq_size"] = action["L1DPQSize"]
         data["L1D"]["mshr_size"] = action["L1DMSHRSize"]
         data["L1D"]["prefetcher"] = action["L1DPrefetcher"]
-        with open("champsim_configs/" + champsim_ctrl_file, "w+") as JsonFile:
+        with open(champsim_ctrl_file, "w+") as JsonFile:
             json.dump(data, JsonFile, indent=4)
 
+def create_batch_job(repo_path, trace, trace_fp, config):
+    total_seconds = WALL_TIME * 3600
+    hours = math.floor(total_seconds // 3600)
+    minutes = math.floor((total_seconds % 3600) // 60)
+    seconds = math.floor(total_seconds % 60)
+    slurm_script = SLURM_TEMPLATE.format(
+        trace=trace, 
+        iter=repo_path[-1],
+        dur = f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}",
+        mem=MEM_SIZE_PER_JOB_MB,
+        repo_path=repo_path, 
+        sim_instructions=SIM_INSTRUCTIONS, 
+        trace_fp=trace_fp,
+        freq=config["Frequency"],
+        ifetch=config["iFetchBufferSize"],
+        decode=config["DecodeBufferSize"],
+        dispatch=config["DispatchBufferSize"],
+        rob=config["ROBSize"]
+    )
+    script_path = f"{repo_path}/batch/batch_script_{trace}.sh"
+    with open(script_path, "w") as script_file:
+        script_file.write(slurm_script)
+
 # Run the ChampSim program with the selected configuration
-def run_program(iter, action_dict, trace, trace_fp):
+def setup_champsim(action_dict):
     def current_datetime_to_numeric_representation():
         reference_datetime = datetime(2022, 1, 1)
         current_datetime = datetime.now()
         total_seconds = (current_datetime - reference_datetime).total_seconds()
         return total_seconds
 
-    name = trace + "_" + str(os.getpid())
-    binary_name = f"champsim_{trace}_" + str(os.getpid())
+    # name = trace + "_" + str(os.getpid())
+    binary_name = f"run_champsim"
     # Configure the program with the selected configuration
     print("Configuring ChampSim with provided configuration")
     process = subprocess.Popen(
-        ["./config.sh", "champsim_configs/champsim_config_" + trace + "_" + str(os.getpid()) + ".json"],
+        ["./config.sh", "champsim_config.json"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -315,68 +383,64 @@ def run_program(iter, action_dict, trace, trace_fp):
         print(action_dict)
         sys.exit()
     print("Done configuring/making config")
-    output_json_dir = f"output/json_long_{trace}_" + str(os.getpid())
-    output_logs_dir = f"output/logs_long_{trace}_" + str(os.getpid())
-    if not os.path.exists(output_json_dir):
-        os.makedirs(output_json_dir)
-    if not os.path.exists(output_logs_dir):
-        os.makedirs(output_logs_dir)
-    start_time = time.time()
-    # Run the program with the selected configuration
-    print("Running ChampSim with provided configuration and trace")
-    update_config_status(trace, action_dict, "running", pid=os.getpid())
-    process = subprocess.Popen(
-        [
-            "./bin/" + binary_name,
-            "-w",
-            "0",
-            "--simulation-instructions",
-            str(SIM_INSTRUCTIONS),
-            trace_fp,
-            "--json",
-            f"{output_json_dir}/{name}.json",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
-    out, err = process.communicate()
-    print("Done running program, time to run:", (time.time() - start_time) / 60)
-    update_config_status(trace, action_dict, "completed", result="Success", pid=os.getpid(), duration=(time.time() - start_time) / 60)
-    if err.decode() == "":
-        outstream = out.decode()
-    else:
-        update_config_status(trace, action_dict, "error", result=err.decode())
-        print(err.decode())
-        print(print(action_dict))
-    if len(outstream) < 100:
-        print(outstream)
-    # Store the output to a text and JSON files
-    txt_file_path = f"{output_logs_dir}/{name}.txt"
-    with open(txt_file_path, "w+") as txt_file:
-        txt_file.write(outstream)
+    # update_config_status(trace, action_dict, "running", pid=os.getpid())
+    # process = subprocess.Popen(
+    #     [
+    #         "./bin/" + binary_name,
+    #         "-w",
+    #         "0",
+    #         "--simulation-instructions",
+    #         str(SIM_INSTRUCTIONS),
+    #         trace_fp,
+    #         "--json",
+    #         f"{output_json_dir}/{name}.json",
+    #     ],
+    #     stdout=subprocess.PIPE,
+    #     stderr=subprocess.PIPE
+    # )
+    # out, err = process.communicate()
+    # print("Done running program, time to run:", (time.time() - start_time) / 60)
+    # update_config_status(trace, action_dict, "completed", result="Success", pid=os.getpid(), duration=(time.time() - start_time) / 60)
+    # if err.decode() == "":
+    #     outstream = out.decode()
+    # else:
+    #     update_config_status(trace, action_dict, "error", result=err.decode())
+    #     print(err.decode())
+    #     print(print(action_dict))
+    # if len(outstream) < 100:
+    #     print(outstream)
+    # # Store the output to a text and JSON files
+    # txt_file_path = f"{output_logs_dir}/{name}.txt"
+    # with open(txt_file_path, "w+") as txt_file:
+    #     txt_file.write(outstream)
 
-    print("Done storing everything")
+    # print("Done storing everything")
 
-# TODO: Get traces from specified directory
 traces = os.listdir(TRACE_DIR)
 
 def main():
-    random.shuffle(traces)
     initialize_db()
 
+    # Offset the traces to run
+    traces = traces[TRACES_OFFSET:]
+
+    print("Selecting configuration...")
+    action_dict = select_config()
+    setup_champsim(action_dict)
+
     for (iter, trace) in enumerate(traces):
-        if iter == 1:
-            for i in range(1):
-                try:
-                    print("Trace:", trace)
-                    print("Selecting configuration...")
-                    action_dict = select_config(trace)
-                    run_program(iter, action_dict, trace, TRACE_DIR + trace)
-                except KeyboardInterrupt:
-                    sys.exit()
-                except Exception as ex:
-                    print("ERROR:", ex)
-                    continue
+        if iter < TRACES_TO_RUN:
+            try:
+                print("Trace:", trace)
+                # Set up the batch job for each trace
+                trace_fp = f"{TRACE_DIR}/{trace}"
+                create_batch_job(os.getcwd(), trace, trace_fp, action_dict)
+                save_config_to_db(trace, action_dict)
+            except KeyboardInterrupt:
+                sys.exit()
+            except Exception as ex:
+                print("ERROR:", ex)
+                continue
 
 if __name__ == "__main__":
     main()

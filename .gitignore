@@ -28,3 +28,9 @@ champsim_configs.db
 output_*.log
 
 run_champsim_*.sh
+
+core.*
+
+champsim_config.json
+
+batch/**
