@@ -28,15 +28,29 @@ cd {repo_path}  # Navigate to the correct ChampSim repo
 
 # Get time before running the program
 start_time=$(date +%s)
+python3 update_status.py {trace} {freq} {ifetch} {decode} {dispatch} {rob} True running
+
+# Run ChampSim and check its exit status
 ./bin/run_champsim -w 0 --simulation-instructions {sim_instructions} {trace_fp} --json output/json_long_{trace}.json
+run_status=$?
+
 end_time=$(date +%s)
 duration_secs=$((end_time - start_time))
-duration_mins=$((duration_secs / 60))
+duration_mins=$(echo "scale=2; $duration_secs / 60" | bc)
 
-python3 update_status.py {trace} {freq} {ifetch} {decode} {dispatch} {rob} completed Success $duration_mins
+# Determine if the run was successful based on the exit status
+if [ $run_status -eq 0 ]; then
+    result="Success"
+else
+    result="Failure"
+fi
+
+# Call update_status.py with the result
+echo "Command: python3 update_status.py {trace} {freq} {ifetch} {decode} {dispatch} {rob} True completed $result $duration_mins"
+python3 update_status.py {trace} {freq} {ifetch} {decode} {dispatch} {rob} False completed $result $duration_mins
 
 # Remove the batch script
-rm -- "$0"
+rm {repo_path}/batch/batch_script_{trace}.sh
 """
 
 # Initialize the database which stores already run configurations
