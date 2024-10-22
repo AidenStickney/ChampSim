@@ -143,7 +143,7 @@ def save_config_to_db(trace, config, additional_info=None):
                           l1i_rq_size, l1i_wq_size, l1i_pq_size, l1i_mshr_size, l1i_prefetcher, 
                           l1d_sets, l1d_ways, l1d_rq_size, l1d_wq_size, l1d_pq_size, l1d_mshr_size, 
                           l1d_prefetcher, directory, timestamp, status, result, duration, additional_info)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                        (trace, SIM_INSTRUCTIONS, config["Frequency"], config["iFetchBufferSize"], config["DecodeBufferSize"],
                         config["DispatchBufferSize"], config["ROBSize"], config["LQSize"], config["SQSize"],
                         config["FetchWidth"], config["DecodeWidth"], config["DispatchWidth"], config["ExecuteWidth"],
