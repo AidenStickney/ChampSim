@@ -31,13 +31,17 @@ cd {repo_path}  # Navigate to the correct ChampSim repo
 
 # Get time before running the program
 start_time=$(date +%s)
+echo "Start Time: $(date +"%Y-%m-%d %H:%M:%S")"
+
 python3 update_status.py {trace} {freq} {ifetch} {decode} {dispatch} {rob} True running
 
 # Run ChampSim and check its exit status
-./bin/run_champsim -w 0 --simulation-instructions {sim_instructions} {trace_fp} --json {json_output}
+./bin/run_champsim --no-repeat-traces -w 0 --simulation-instructions {sim_instructions} {trace_fp} --json {json_output}
 run_status=$?
 
 end_time=$(date +%s)
+echo "End Time: $(date +"%Y-%m-%d %H:%M:%S")"
+
 duration_secs=$((end_time - start_time))
 duration_mins=$(echo "scale=2; $duration_secs / 60" | bc)
 
