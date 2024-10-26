@@ -28,6 +28,7 @@ SLURM_TEMPLATE = """#!/bin/bash
 
 module load GCCcore CMake git  # Load necessary modules
 cd {repo_path}  # Navigate to the correct ChampSim repo
+pip install requests
 
 # Get time before running the program
 start_time=$(date +%s)
