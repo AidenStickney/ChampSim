@@ -47,6 +47,12 @@ $ bin/champsim --warmup_instructions 200000000 --simulation_instructions 5000000
 
 The number of warmup and simulation instructions given will be the number of instructions retired. Note that the statistics printed at the end of the simulation include only the simulation phase.
 
+### Added Options
+This fork includes command line options for EarlyPerf:
+- `--sim-points <N>`: Breaks the simulation into N sections (used for sampling after each simulation section).
+- `--estimated-instructions <N>`: Sets estimated total instruction count (used with `--sim-points` to calculate instructions per interval).
+- `--no-repeat-traces`: Prevents traces from restarting when they reach the end.
+
 # Add your own branch predictor, data prefetchers, and replacement policy
 **Copy an empty template**
 ```
